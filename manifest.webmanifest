@@ -1,7 +1,7 @@
 {
-  "name": "CurrencyLive — Daily Currency Converter",
+  "name": "CurrencyLive — Currency & Gold Tracker",
   "short_name": "CurrencyLive",
-  "description": "A private, offline-ready currency converter using latest available daily reference rates.",
+  "description": "An offline-ready currency converter and verified international gold spot tracker.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

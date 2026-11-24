@@ -1,7 +1,10 @@
 'use strict';
 
 const API = 'https://api.frankfurter.dev/v1';
+const GOLD_API = 'https://api.gold-api.com/price/XAU';
 const REFRESH_MS = 60 * 60 * 1000;
+const GOLD_REFRESH_MS = 60 * 1000;
+const TROY_OUNCE_GRAMS = 31.1034768;
 const MAX_AMOUNT = 1e15;
 const FALLBACK_CURRENCIES = {
   AUD:'Australian Dollar', BGN:'Bulgarian Lev', BRL:'Brazilian Real', CAD:'Canadian Dollar', CHF:'Swiss Franc', CNY:'Chinese Renminbi Yuan', CZK:'Czech Koruna', DKK:'Danish Krone', EUR:'Euro', GBP:'British Pound', HKD:'Hong Kong Dollar', HUF:'Hungarian Forint', IDR:'Indonesian Rupiah', ILS:'Israeli New Shekel', INR:'Indian Rupee', ISK:'Icelandic Króna', JPY:'Japanese Yen', KRW:'South Korean Won', MXN:'Mexican Peso', MYR:'Malaysian Ringgit', NOK:'Norwegian Krone', NZD:'New Zealand Dollar', PHP:'Philippine Peso', PLN:'Polish Złoty', RON:'Romanian Leu', SEK:'Swedish Krona', SGD:'Singapore Dollar', THB:'Thai Baht', TRY:'Turkish Lira', USD:'US Dollar', ZAR:'South African Rand'
@@ -18,6 +21,15 @@ const els = {
   installCopy: $('installCopy'), installSteps: $('installSteps')
 };
 const state = { currencies: {...FALLBACK_CURRENCIES}, from:'USD', to:'INR', amount:1, rate:null, date:null, fetchedAt:null, history:[], range:30, controller:null, deferredInstall:null };
+const goldEls = {
+  refresh:$('goldRefreshBtn'), spotUsd:$('goldSpotUsd'), pureInr:$('goldPureInr'), fxRate:$('goldFxRate'), fxDate:$('goldFxDate'),
+  change:$('goldChangeBadge'), timestamp:$('goldTimestamp'), notice:$('goldNotice'), tableUnit:$('goldTableUnit'),
+  inr999:$('gold999Inr'), usd999:$('gold999Usd'), inr916:$('gold916Inr'), usd916:$('gold916Usd'), inr750:$('gold750Inr'), usd750:$('gold750Usd'),
+  chartSvg:$('goldChartSvg'), chartLine:$('goldChartLine'), chartArea:$('goldChartArea'), chartEmpty:$('goldChartEmpty'), chartLow:$('goldChartLow'), chartHigh:$('goldChartHigh'),
+  weight:$('goldWeightInput'), weightUnit:$('goldWeightUnit'), purity:$('goldPurityInput'), making:$('goldMakingInput'), gst:$('goldGstInput'),
+  calcMetal:$('calcMetal'), calcMaking:$('calcMaking'), calcGst:$('calcGst'), calcTotal:$('calcTotal')
+};
+const goldState = { data:null, history:[], range:30, weightMultiplier:1, loading:false, failures:0, timer:null, controller:null };
 
 function safeJSON(value, fallback) { try { return JSON.parse(value) ?? fallback; } catch { return fallback; } }
 function cacheKey(from=state.from,to=state.to) { return `cl-rate-${from}-${to}`; }
@@ -33,6 +45,20 @@ function formatNumber(value, max=6) {
 function formatDate(date) {
   if (!date) return 'unknown date';
   return new Intl.DateTimeFormat('en-IN',{dateStyle:'medium',timeZone:'Asia/Kolkata'}).format(new Date(`${date}T12:00:00Z`));
+}
+function formatMoney(value,currency='INR',digits=2) {
+  if (!Number.isFinite(value)) return '—';
+  return new Intl.NumberFormat('en-IN',{style:'currency',currency,maximumFractionDigits:digits,minimumFractionDigits:digits}).format(value);
+}
+function formatIST(timestamp) {
+  const date=new Date(timestamp);
+  if (!Number.isFinite(date.getTime())) return 'Unknown source time';
+  return new Intl.DateTimeFormat('en-IN',{dateStyle:'medium',timeStyle:'medium',hour12:true,timeZone:'Asia/Kolkata'}).format(date)+' IST';
+}
+function istDateKey(timestamp=Date.now()) {
+  const parts=new Intl.DateTimeFormat('en-CA',{year:'numeric',month:'2-digit',day:'2-digit',timeZone:'Asia/Kolkata'}).formatToParts(new Date(timestamp));
+  const get=type=>parts.find(p=>p.type===type)?.value;
+  return `${get('year')}-${get('month')}-${get('day')}`;
 }
 function validAmount(raw) {
   const cleaned = String(raw).replace(/,/g,'').trim();
@@ -67,6 +93,7 @@ function setNetwork() {
   els.network.className = `status-pill ${online ? 'online':'offline'}`;
   els.network.lastElementChild.textContent = online ? 'Online' : 'Offline';
   if (!online) setNotice('Offline — showing the last successfully cached rate when available.', 'warning');
+  if (!online && document.documentElement.dataset.section==='gold') setGoldNotice('Offline — showing the last verified cached gold and FX data when available.', 'warning');
 }
 function showRate(data, cached=false) {
   state.rate = Number(data.rate); state.date = data.date; state.fetchedAt = data.fetchedAt || Date.now();
@@ -170,6 +197,100 @@ function drawChart() {
   els.chartLow.textContent=`Low ${formatNumber(min,4)}`;els.chartHigh.textContent=`High ${formatNumber(max,4)}`;
 }
 
+function setGoldNotice(message='',type='') { goldEls.notice.textContent=message;goldEls.notice.className=`notice ${type}`.trim(); }
+function goldPurePerGram(data=goldState.data) {
+  if (!data) return null;
+  return {usd:data.spotUsd/TROY_OUNCE_GRAMS,inr:data.spotUsd*data.fx/TROY_OUNCE_GRAMS};
+}
+function renderGold(cached=false) {
+  const data=goldState.data,pure=goldPurePerGram();
+  if (!data||!pure) return;
+  goldEls.spotUsd.textContent=formatMoney(data.spotUsd,'USD',2);
+  goldEls.pureInr.textContent=formatMoney(pure.inr,'INR',2);
+  goldEls.fxRate.textContent=formatNumber(data.fx,4);
+  goldEls.fxDate.textContent=`Frankfurter • ${formatDate(data.fxDate)}`;
+  goldEls.timestamp.textContent=`Gold source: ${formatIST(data.updatedAt)}`;
+  const sourceAge=Date.now()-new Date(data.updatedAt).getTime();
+  const stale=sourceAge>3*60*1000;
+  if (cached) setGoldNotice(`Cached verified data${stale?' • stale':''} • FX source date ${formatDate(data.fxDate)}`,stale?'warning':'');
+  else setGoldNotice(`Live international spot • INR estimate uses daily FX dated ${formatDate(data.fxDate)}${stale?' • source may be stale':''}`,stale?'warning':'');
+  renderGoldRates();renderGoldCalculator();renderGoldChange();drawGoldChart();
+}
+function renderGoldRates() {
+  const pure=goldPurePerGram();if(!pure)return;
+  const weight=goldState.weightMultiplier;
+  const unit={1:'per gram',10:'per 10 grams',100:'per 100 grams',1000:'per kilogram'}[weight]||`for ${weight} g`;
+  goldEls.tableUnit.textContent=unit;
+  [[.999,goldEls.inr999,goldEls.usd999],[.916,goldEls.inr916,goldEls.usd916],[.750,goldEls.inr750,goldEls.usd750]].forEach(([purity,inr,usd])=>{
+    inr.textContent=formatMoney(pure.inr*purity*weight,'INR',2);usd.textContent=formatMoney(pure.usd*purity*weight,'USD',2);
+  });
+}
+function renderGoldCalculator() {
+  const pure=goldPurePerGram();if(!pure)return;
+  const weight=Number(goldEls.weight.value),unit=Number(goldEls.weightUnit.value),purity=Number(goldEls.purity.value),makingPct=Number(goldEls.making.value);
+  if (![weight,unit,purity,makingPct].every(Number.isFinite)||weight<0||makingPct<0||makingPct>100) {
+    [goldEls.calcMetal,goldEls.calcMaking,goldEls.calcGst,goldEls.calcTotal].forEach(el=>el.textContent='Invalid');return;
+  }
+  const metal=pure.inr*purity*weight*unit,making=metal*(makingPct/100),gst=goldEls.gst.checked?(metal+making)*.03:0,total=metal+making+gst;
+  goldEls.calcMetal.textContent=formatMoney(metal);goldEls.calcMaking.textContent=formatMoney(making);goldEls.calcGst.textContent=formatMoney(gst);goldEls.calcTotal.textContent=formatMoney(total);
+}
+function loadGoldHistory() { goldState.history=safeJSON(localStorage.getItem('cl-gold-history-v1'),[]).filter(p=>p&&p.date&&Number.isFinite(p.spotUsd)&&Number.isFinite(p.inr999)).sort((a,b)=>a.date.localeCompare(b.date)).slice(-400); }
+function recordGoldSnapshot() {
+  const data=goldState.data,pure=goldPurePerGram();if(!data||!pure)return;
+  loadGoldHistory();const date=istDateKey(data.updatedAt);const point={date,spotUsd:data.spotUsd,inr999:pure.inr*.999,updatedAt:data.updatedAt};
+  const index=goldState.history.findIndex(p=>p.date===date);if(index>=0)goldState.history[index]=point;else goldState.history.push(point);
+  goldState.history=goldState.history.sort((a,b)=>a.date.localeCompare(b.date)).slice(-400);localStorage.setItem('cl-gold-history-v1',JSON.stringify(goldState.history));
+}
+function filteredGoldHistory() {
+  const cutoff=new Date();cutoff.setUTCDate(cutoff.getUTCDate()-goldState.range-1);const key=cutoff.toISOString().slice(0,10);return goldState.history.filter(p=>p.date>=key);
+}
+function renderGoldChange() {
+  const points=goldState.history;
+  goldEls.change.className='change neutral';goldEls.change.textContent='Daily change unavailable';
+  if(points.length<2)return;
+  const prev=points.at(-2).spotUsd,current=points.at(-1).spotUsd,delta=current-prev,pct=delta/prev*100;
+  if(!Number.isFinite(pct))return;
+  goldEls.change.textContent=`${delta>=0?'+':''}${formatMoney(delta,'USD',2)} (${pct>=0?'+':''}${pct.toFixed(2)}%) daily`;
+  goldEls.change.className=`change ${delta>0?'up':delta<0?'down':'neutral'}`;
+}
+function drawGoldChart() {
+  const points=filteredGoldHistory();
+  if(points.length<2){goldEls.chartLine.setAttribute('d','');goldEls.chartArea.setAttribute('d','');goldEls.chartEmpty.style.display='grid';goldEls.chartLow.textContent='Low —';goldEls.chartHigh.textContent='High —';return;}
+  goldEls.chartEmpty.style.display='none';const values=points.map(p=>p.inr999),min=Math.min(...values),max=Math.max(...values),spread=max-min||1;
+  const x=i=>20+i/(points.length-1)*760,y=v=>25+(1-(v-min)/spread)*195;
+  const line=points.map((p,i)=>`${i?'L':'M'}${x(i).toFixed(2)} ${y(p.inr999).toFixed(2)}`).join(' ');
+  goldEls.chartLine.setAttribute('d',line);goldEls.chartArea.setAttribute('d',`${line} L780 220 L20 220 Z`);
+  goldEls.chartLow.textContent=`Low ${formatMoney(min,'INR',0)}`;goldEls.chartHigh.textContent=`High ${formatMoney(max,'INR',0)}`;
+}
+function scheduleGoldRefresh(delay=GOLD_REFRESH_MS) {
+  clearTimeout(goldState.timer);if(document.hidden||document.documentElement.dataset.section!=='gold')return;
+  goldState.timer=setTimeout(()=>loadGold(),delay);
+}
+async function loadGold({manual=false}={}) {
+  if(goldState.loading&&!manual)return;
+  if(goldState.controller)goldState.controller.abort();goldState.controller=new AbortController();goldState.loading=true;goldEls.refresh.classList.add('loading');goldEls.refresh.disabled=true;
+  try {
+    const [gold,fx]=await Promise.all([fetchJSON(GOLD_API,goldState.controller.signal),fetchJSON(`${API}/latest?from=USD&to=INR`,goldState.controller.signal)]);
+    const spotUsd=Number(gold.price),rate=Number(fx.rates?.INR),updatedAt=gold.updatedAt;
+    if(gold.symbol!=='XAU'||gold.currency!=='USD'||!Number.isFinite(spotUsd)||spotUsd<=0||!Number.isFinite(rate)||rate<=0||!updatedAt||!fx.date)throw new Error('Invalid gold or FX response');
+    goldState.data={spotUsd,fx:rate,fxDate:fx.date,updatedAt,fetchedAt:Date.now()};localStorage.setItem('cl-gold-latest-v1',JSON.stringify(goldState.data));
+    recordGoldSnapshot();goldState.failures=0;renderGold(false);if(manual)setGoldNotice(`Refreshed • Gold source ${formatIST(updatedAt)} • FX ${formatDate(fx.date)}`);
+    scheduleGoldRefresh();
+  } catch(error) {
+    if(error.name==='AbortError')return;
+    goldState.failures+=1;const cached=safeJSON(localStorage.getItem('cl-gold-latest-v1'),null);
+    if(cached&&Number.isFinite(Number(cached.spotUsd))&&Number.isFinite(Number(cached.fx))){goldState.data=cached;loadGoldHistory();renderGold(true);}else{goldState.data=null;setGoldNotice('No verified gold price is available. Connect to the internet and try again.','error');}
+    scheduleGoldRefresh(Math.min(GOLD_REFRESH_MS*2**goldState.failures,15*60*1000));
+  } finally {goldState.loading=false;goldEls.refresh.classList.remove('loading');goldEls.refresh.disabled=false;}
+}
+function switchView(view,persist=true) {
+  const next=view==='gold'?'gold':'currency';document.documentElement.dataset.section=next;
+  document.querySelectorAll('[data-view]').forEach(btn=>{const active=btn.dataset.view===next;btn.classList.toggle('active',active);btn.setAttribute('aria-selected',String(active));});
+  document.querySelectorAll('[data-view-panel]').forEach(panel=>{const active=panel.dataset.viewPanel===next;panel.hidden=!active;panel.classList.toggle('active',active);});
+  if(persist)localStorage.setItem('cl-view',next);updateThemeColor();requestAnimationFrame(()=>{drawChart();drawGoldChart();});
+  if(next==='gold'){const age=Date.now()-(goldState.data?.fetchedAt||0);if(!goldState.data||age>=GOLD_REFRESH_MS)loadGold();else scheduleGoldRefresh(GOLD_REFRESH_MS-age);}else clearTimeout(goldState.timer);
+}
+
 function persistPair() { localStorage.setItem('cl-preferences',JSON.stringify({from:state.from,to:state.to})); }
 function commitCurrency(input,side) {
   const code=validCode(input.value);
@@ -180,9 +301,10 @@ function commitCurrency(input,side) {
 function initTheme() {
   const saved=localStorage.getItem('cl-theme');
   const theme=saved || (matchMedia('(prefers-color-scheme: light)').matches?'light':'dark');
-  document.documentElement.dataset.theme=theme; document.querySelector('meta[name="theme-color"]').content=theme==='dark'?'#071b18':'#f2faf6';
+  document.documentElement.dataset.theme=theme; updateThemeColor();
 }
-function toggleTheme() { const next=document.documentElement.dataset.theme==='dark'?'light':'dark';document.documentElement.dataset.theme=next;localStorage.setItem('cl-theme',next);document.querySelector('meta[name="theme-color"]').content=next==='dark'?'#071b18':'#f2faf6';drawChart(); }
+function updateThemeColor(){const dark=document.documentElement.dataset.theme==='dark',gold=document.documentElement.dataset.section==='gold';document.querySelector('meta[name="theme-color"]').content=dark?(gold?'#181207':'#071b18'):(gold?'#fff8e8':'#f2faf6');}
+function toggleTheme() { const next=document.documentElement.dataset.theme==='dark'?'light':'dark';document.documentElement.dataset.theme=next;localStorage.setItem('cl-theme',next);updateThemeColor();drawChart();drawGoldChart(); }
 function showInstallHelp() {
   const ios=/iphone|ipad|ipod/i.test(navigator.userAgent), standalone=matchMedia('(display-mode: standalone)').matches||navigator.standalone;
   els.installSteps.replaceChildren();
@@ -200,20 +322,27 @@ function bindEvents() {
   [els.from,els.to].forEach(input=>input.addEventListener('input',()=>{input.value=input.value.toUpperCase().replace(/[^A-Z]/g,'').slice(0,3);}));
   els.swap.addEventListener('click',()=>{[state.from,state.to]=[state.to,state.from];persistPair();renderCurrencyMeta();els.swap.classList.remove('swapping');void els.swap.offsetWidth;els.swap.classList.add('swapping');loadRate();});
   els.refresh.addEventListener('click',()=>loadRate({manual:true})); els.theme.addEventListener('click',toggleTheme);
+  document.querySelectorAll('[data-view]').forEach(btn=>btn.addEventListener('click',()=>switchView(btn.dataset.view)));
   document.querySelectorAll('[data-range]').forEach(btn=>btn.addEventListener('click',()=>{document.querySelectorAll('[data-range]').forEach(b=>b.classList.toggle('active',b===btn));state.range=Number(btn.dataset.range);loadHistory();}));
-  window.addEventListener('online',()=>{setNetwork();loadRate();});window.addEventListener('offline',setNetwork);window.addEventListener('resize',()=>requestAnimationFrame(drawChart));
+  document.querySelectorAll('[data-gold-weight]').forEach(btn=>btn.addEventListener('click',()=>{document.querySelectorAll('[data-gold-weight]').forEach(b=>b.classList.toggle('active',b===btn));goldState.weightMultiplier=Number(btn.dataset.goldWeight);renderGoldRates();}));
+  document.querySelectorAll('[data-gold-range]').forEach(btn=>btn.addEventListener('click',()=>{document.querySelectorAll('[data-gold-range]').forEach(b=>b.classList.toggle('active',b===btn));goldState.range=Number(btn.dataset.goldRange);drawGoldChart();}));
+  [goldEls.weight,goldEls.weightUnit,goldEls.purity,goldEls.making,goldEls.gst].forEach(input=>input.addEventListener('input',renderGoldCalculator));
+  goldEls.refresh.addEventListener('click',()=>loadGold({manual:true}));
+  window.addEventListener('online',()=>{setNetwork();loadRate();if(document.documentElement.dataset.section==='gold')loadGold();});window.addEventListener('offline',setNetwork);window.addEventListener('resize',()=>requestAnimationFrame(()=>{drawChart();drawGoldChart();}));
   window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();state.deferredInstall=e;els.install.hidden=false;});
   els.install.addEventListener('click',async()=>{if(state.deferredInstall){state.deferredInstall.prompt();await state.deferredInstall.userChoice;state.deferredInstall=null;els.install.hidden=true;}else showInstallHelp();});
   if (/iphone|ipad|ipod/i.test(navigator.userAgent)) { els.install.hidden=false; }
   window.addEventListener('appinstalled',()=>{els.install.hidden=true;setNotice('CurrencyLive installed successfully.');});
-  document.addEventListener('visibilitychange',()=>{if(!document.hidden&&Date.now()-(state.fetchedAt||0)>REFRESH_MS)loadRate();});
+  document.addEventListener('visibilitychange',()=>{if(document.hidden){clearTimeout(goldState.timer);return;}if(Date.now()-(state.fetchedAt||0)>REFRESH_MS)loadRate();if(document.documentElement.dataset.section==='gold'){const age=Date.now()-(goldState.data?.fetchedAt||0);age>=GOLD_REFRESH_MS?loadGold():scheduleGoldRefresh(GOLD_REFRESH_MS-age);}});
 }
 async function init() {
-  initTheme();setNetwork();bindEvents();
+  document.documentElement.dataset.section=localStorage.getItem('cl-view')==='gold'?'gold':'currency';initTheme();setNetwork();bindEvents();loadGoldHistory();
   const pref=safeJSON(localStorage.getItem('cl-preferences'),{from:'USD',to:'INR'});state.from=pref.from||'USD';state.to=pref.to||'INR';
   await loadCurrencies();
   const cached=safeJSON(localStorage.getItem(cacheKey()),null);if(cached)showRate(cached,true);
+  const goldCached=safeJSON(localStorage.getItem('cl-gold-latest-v1'),null);if(goldCached&&Number.isFinite(Number(goldCached.spotUsd))&&Number.isFinite(Number(goldCached.fx))){goldState.data=goldCached;renderGold(true);}
   await loadRate();
+  switchView(document.documentElement.dataset.section,false);
   if('serviceWorker' in navigator){try{await navigator.serviceWorker.register('./sw.js');}catch{setNotice('Offline installation support could not be enabled.', 'warning');}}
   setInterval(()=>{if(!document.hidden&&navigator.onLine)loadRate();},REFRESH_MS);
 }
