@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#071b18">
+  <meta name="description" content="CurrencyLive converts currencies with the latest available Frankfurter reference rates and offline support.">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="CurrencyLive">
+  <title>CurrencyLive — Daily Currency Converter</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="assets/icon-192.png">
+  <link rel="preconnect" href="https://api.frankfurter.dev" crossorigin>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="ambient ambient-one" aria-hidden="true"></div>
+  <div class="ambient ambient-two" aria-hidden="true"></div>
+  <main class="shell">
+    <header class="topbar">
+      <a class="brand" href="#" aria-label="CurrencyLive home">
+        <span class="brand-mark" aria-hidden="true">CL</span>
+        <span><strong>CurrencyLive</strong><small>Daily reference rates</small></span>
+      </a>
+      <div class="header-actions">
+        <span id="networkBadge" class="status-pill"><span class="status-dot"></span><span>Checking</span></span>
+        <button id="installBtn" class="icon-btn install-btn" type="button" hidden aria-label="Install CurrencyLive">Install</button>
+        <button id="themeBtn" class="icon-btn" type="button" aria-label="Switch theme" title="Switch theme">
+          <span class="sun" aria-hidden="true">☀</span><span class="moon" aria-hidden="true">☾</span>
+        </button>
+      </div>
+    </header>
+
+    <section class="intro" aria-labelledby="pageTitle">
+      <p class="eyebrow">Simple. Accurate. Private.</p>
+      <h1 id="pageTitle">Convert with confidence.</h1>
+      <p>Latest available daily reference rates, clearly dated and ready offline.</p>
+    </section>
+
+    <section class="converter glass" aria-label="Currency converter">
+      <div class="converter-grid">
+        <div class="currency-panel">
+          <label for="amountInput">You send</label>
+          <div class="amount-row">
+            <input id="amountInput" inputmode="decimal" autocomplete="off" value="1" aria-describedby="inputHelp">
+            <div class="currency-entry">
+              <span id="fromFlag" class="flag" aria-hidden="true">🇺🇸</span>
+              <input id="fromCurrency" list="currencyList" value="USD" maxlength="3" aria-label="Source currency" autocomplete="off" spellcheck="false">
+            </div>
+          </div>
+          <span id="inputHelp" class="sr-only">Enter a positive number</span>
+          <span id="fromName" class="currency-name">US Dollar</span>
+        </div>
+
+        <button id="swapBtn" class="swap-btn" type="button" aria-label="Swap source and destination currencies" title="Swap currencies">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 3-3m-3 3 3 3M7 7h10m0 10-3 3m3-3-3-3m3 3H7"/></svg>
+        </button>
+
+        <div class="currency-panel result-panel">
+          <label>They receive</label>
+          <div class="amount-row">
+            <output id="resultValue" aria-live="polite">—</output>
+            <div class="currency-entry">
+              <span id="toFlag" class="flag" aria-hidden="true">🇮🇳</span>
+              <input id="toCurrency" list="currencyList" value="INR" maxlength="3" aria-label="Destination currency" autocomplete="off" spellcheck="false">
+            </div>
+          </div>
+          <span id="toName" class="currency-name">Indian Rupee</span>
+        </div>
+      </div>
+
+      <datalist id="currencyList"></datalist>
+
+      <div class="rate-strip">
+        <div>
+          <span class="meta-label">Exchange rate</span>
+          <strong id="rateText">Loading latest rate…</strong>
+        </div>
+        <div class="rate-meta">
+          <span id="changeBadge" class="change neutral">—</span>
+          <button id="refreshBtn" class="refresh-btn" type="button" aria-label="Refresh exchange rate">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66L20 8M20 4v4h-4"/></svg>
+            Refresh
+          </button>
+        </div>
+      </div>
+      <div id="notice" class="notice" role="status" aria-live="polite"></div>
+    </section>
+
+    <section class="chart-card glass" aria-labelledby="chartTitle">
+      <div class="chart-head">
+        <div>
+          <span class="meta-label">Historical trend</span>
+          <h2 id="chartTitle">USD to INR</h2>
+        </div>
+        <div class="range-tabs" role="group" aria-label="Chart period">
+          <button type="button" data-range="7">7D</button>
+          <button type="button" data-range="30" class="active">30D</button>
+          <button type="button" data-range="90">90D</button>
+          <button type="button" data-range="365">1Y</button>
+        </div>
+      </div>
+      <div class="chart-wrap">
+        <canvas id="rateChart" role="img" aria-label="Historical exchange rate chart"></canvas>
+        <div id="chartEmpty" class="chart-empty" hidden>Historical data is unavailable.</div>
+      </div>
+      <div class="chart-footer">
+        <span id="chartLow">Low —</span><span id="chartHigh">High —</span>
+      </div>
+    </section>
+
+    <aside class="reference-note">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5m0-8v.01"/></svg>
+      <p><strong>Reference rate, not live forex.</strong> Frankfurter publishes latest available daily rates from public institutional sources. Banks and payment providers may use different rates and fees.</p>
+    </aside>
+
+    <footer>
+      <span>CurrencyLive</span><span>•</span><span>No accounts. No tracking. ₹0 running cost.</span>
+    </footer>
+  </main>
+
+  <dialog id="installDialog">
+    <form method="dialog">
+      <button class="dialog-close" value="close" aria-label="Close">×</button>
+      <span class="brand-mark large" aria-hidden="true">CL</span>
+      <h2>Install CurrencyLive</h2>
+      <p id="installCopy">Add it to your home screen for quick access and offline use.</p>
+      <ol id="installSteps"></ol>
+      <button class="primary-btn" value="close">Got it</button>
+    </form>
+  </dialog>
+
+  <noscript>CurrencyLive requires JavaScript to fetch and calculate currency rates.</noscript>
+  <script src="app.js" defer></script>
+</body>
+</html>
