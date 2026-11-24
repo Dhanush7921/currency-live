@@ -153,6 +153,7 @@ async function loadHistory(cachedOnly=false) {
 function drawChart() {
   const canvas=els.chart, points=state.history;
   els.empty.hidden=points.length>1;
+  els.empty.style.display=points.length>1?'none':'grid';
   if (points.length<2) { canvas.getContext('2d').clearRect(0,0,canvas.width,canvas.height); els.chartLow.textContent='Low —'; els.chartHigh.textContent='High —'; return; }
   const rect=canvas.getBoundingClientRect(), dpr=Math.min(devicePixelRatio||1,2);
   canvas.width=Math.max(1,Math.round(rect.width*dpr)); canvas.height=Math.max(1,Math.round(rect.height*dpr));
